@@ -46,3 +46,12 @@ CREATE TABLE IF NOT EXISTS `maxwell`.`positions` (
   binlog_file varchar(255),
   binlog_position int unsigned
 );
+
+CREATE TABLE IF NOT EXISTS `maxwell`.`bootstrap` (
+  id             int unsigned auto_increment NOT NULL primary key,
+  schema_id      int unsigned,
+  table_id       int unsigned,
+  is_complete    tinyint(1) unsigned,
+  started_at     DATETIME,
+  completed_at   DATETIME
+);

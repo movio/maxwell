@@ -91,9 +91,17 @@ public class MaxwellReplicator extends RunLoopProcess {
 		if (row == null)
 			return;
 
-		if (!skipRow(row)) {
+		if (!isMaxwellRow(row)) {
 			producer.push(row);
-		}
+		} else if (isMaxwellBootstrapStartRow(row)) {
+            Table table = tableCache.getTable((long) row.getData("table_id"));
+            // 1. lock table
+            // 2. produce a 'bootstrap start' message
+            // 3. produce a row per row in table
+            // 4. produce a 'bootstrap complete' message
+            // 5. unlock table
+            // 6. PROFIT !!!
+        }
 
 
 	}
@@ -105,9 +113,15 @@ public class MaxwellReplicator extends RunLoopProcess {
 	}
 
 
-	private boolean skipRow(RowMap row) {
+	private boolean isMaxwellRow(RowMap row) {
 		return row.getDatabase().equals("maxwell");
 	}
+
+    private boolean isMaxwellBootstrapStartRow(RowMap row) {
+        return row.getDatabase().equals("maxwell") &&
+               row.getTable().equals("bootstrap") &&
+               (long) row.getData("is_complete") == 0;
+    }
 
 	private BinlogPosition eventBinlogPosition(AbstractBinlogEventV4 event) {
 		BinlogPosition p = new BinlogPosition(event.getHeader().getNextPosition(), event.getBinlogFilename());
