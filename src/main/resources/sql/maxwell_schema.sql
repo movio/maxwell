@@ -49,9 +49,9 @@ CREATE TABLE IF NOT EXISTS `maxwell`.`positions` (
 
 CREATE TABLE IF NOT EXISTS `maxwell`.`bootstrap` (
   id             int unsigned auto_increment NOT NULL primary key,
-  schema_id      int unsigned,
-  table_id       int unsigned,
-  is_complete    tinyint(1) unsigned,
-  started_at     DATETIME,
-  completed_at   DATETIME
+  `schema_name`  varchar(255) NOT NULL,
+  `table_name`   varchar(255) NOT NULL,
+  is_complete    tinyint(1) unsigned NOT NULL default 0,
+  started_at     DATETIME NOT NULL,
+  completed_at   DATETIME default 0
 );
