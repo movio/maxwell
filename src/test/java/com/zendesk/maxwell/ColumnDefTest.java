@@ -167,7 +167,7 @@ public class ColumnDefTest {
 		assertThat(d.toSQL(Double.valueOf(Double.MAX_VALUE)), is(maxDouble));
 	}
 
-//  Fails in the NZ timezone, disabling for now
+//	Fails in the NZ timezone, disabling for now
 //	@Test
 	public void TestDate() {
 		ColumnDef d = build("date", true);

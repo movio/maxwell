@@ -15,10 +15,11 @@ public class TestMaxwellReplicator extends MaxwellReplicator {
 
 	public TestMaxwellReplicator(Schema currentSchema,
 								 AbstractProducer producer,
+								 AbstractBootstrapper bootstrapper,
 								 MaxwellContext ctx,
 								 BinlogPosition start,
 								 BinlogPosition stop) throws Exception {
-		super(currentSchema, producer, ctx, start);
+		super(currentSchema, producer, bootstrapper, ctx, start);
 		LOGGER.debug("TestMaxwellReplicator initialized from " + start + " to " + stop);
 		this.stopAt = stop;
 	}

@@ -1,16 +1,14 @@
 package com.zendesk.maxwell;
 
 import java.io.IOException;
-import java.sql.*;
-import java.util.Iterator;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import com.google.code.or.binlog.impl.event.*;
-import com.zendesk.maxwell.schema.Database;
-import com.zendesk.maxwell.schema.columndef.ColumnDef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,10 +37,11 @@ public class MaxwellReplicator extends RunLoopProcess {
 	protected final OpenReplicator replicator;
 	private final MaxwellContext context;
 	private final AbstractProducer producer;
+	private final AbstractBootstrapper bootstrapper;
 
 	static final Logger LOGGER = LoggerFactory.getLogger(MaxwellReplicator.class);
 
-	public MaxwellReplicator(Schema currentSchema, AbstractProducer producer, MaxwellContext ctx, BinlogPosition start) throws Exception {
+	public MaxwellReplicator(Schema currentSchema, AbstractProducer producer, AbstractBootstrapper bootstrapper, MaxwellContext ctx, BinlogPosition start) throws Exception {
 		this.schema = currentSchema;
 
 		TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
@@ -59,6 +58,7 @@ public class MaxwellReplicator extends RunLoopProcess {
 		this.replicator.setLevel2BufferSize(50 * 1024 * 1024);
 
 		this.producer = producer;
+		this.bootstrapper = bootstrapper;
 
 		this.context = ctx;
 		this.setBinlogPosition(start);
@@ -93,147 +93,23 @@ public class MaxwellReplicator extends RunLoopProcess {
 		if (row == null)
 			return;
 
-		if (!isMaxwellRow(row) || isMaxwellBootstrapCompleteRow(row)) {
+		if ( !bootstrapper.shouldSkip(row) && !isMaxwellRow(row) ) {
 			producer.push(row);
-		} else if (isMaxwellBootstrapStartRow(row)) {
-            bootstrap(row);
-        }
+		} else {
+			bootstrapper.work(row, schema, producer, replicator);
+		}
 
 	}
 
-    private void bootstrap(RowMap bootstrapRow) throws Exception {
-        String databaseName = (String) bootstrapRow.getData("schema_name");
-        String tableName = (String) bootstrapRow.getData("table_name");
-        LOGGER.debug(String.format("bootstrapping request for %s.%s", databaseName, tableName));
-        Database database = schema.findDatabase(databaseName);
-        if (database == null)
-            throw new RuntimeException("Couldn't find database " + databaseName);
-        Table table = database.findTable(tableName);
-        if (table == null)
-            throw new RuntimeException("Couldn't find table " + tableName);
-        // TODO: lock table
-        BinlogPosition position = new BinlogPosition(this.replicator.getBinlogPosition(), this.replicator.getBinlogFileName());
-        // TODO: unlock table
-        producer.push(bootstrapRow); // this implicitly declares the start of bootstrapping to consumers
-        LOGGER.info(String.format("bootstrapping started for %s.%s, binlog position is %s", databaseName, tableName, position.toString()));
-        String selectAllRows = String.format("select * from %s.%s", databaseName, tableName);
-        try (Connection connection = this.context.getConnectionPool().getConnection()) {
-            // enable streaming of ResultSet, see http://dev.mysql.com/doc/connector-j/en/connector-j-reference-implementation-notes.html
-            Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
-            statement.setFetchSize(Integer.MIN_VALUE);
-            ResultSet resultSet = statement.executeQuery(selectAllRows);
-            Object value;
-            while (resultSet.next()) {
-                RowMap row = new RowMap(
-                        "insert",
-                        databaseName,
-                        tableName,
-                        System.currentTimeMillis(),
-                        table.getPKList(),
-                        position);
-                Iterator<ColumnDef> defIter = table.getColumnList().iterator();
-                int columnIndex = 1;
-                while (defIter.hasNext()) {
-                    ColumnDef d = defIter.next();
-                    LOGGER.debug("bootstrapping: filling column " + d.getName() + " at position " + columnIndex);
-                    // FIXME: this switch statement is a work in progress!
-                    switch(d.getType()) {
-                        case "bool":
-                        case "boolean":
-                        case "tinyint":
-                        case "smallint":
-                        case "mediumint":
-                        case "int":
-                            value = resultSet.getInt(columnIndex);
-                            break;
-                        case "bigint":
-                            value = resultSet.getLong(columnIndex);
-                            break;
-                        case "tinytext":
-                        case "text":
-                        case "mediumtext":
-                        case "longtext":
-                        case "varchar":
-                        case "char":
-                            value = resultSet.getString(columnIndex);
-                            break;
-                        case "tinyblob":
-                        case "blob":
-                        case "mediumblob":
-                        case "longblob":
-                        case "binary":
-                        case "varbinary":
-                            value = resultSet.getBlob(columnIndex);
-                            break;
-                        case "real":
-                        case "numeric":
-                        case "float":
-                        case "double":
-                            value = resultSet.getDouble(columnIndex);
-                            break;
-                        case "decimal":
-                            value = resultSet.getBigDecimal(columnIndex);
-                            break;
-                        case "date":
-                            value = resultSet.getDate(columnIndex);
-                            break;
-                        case "datetime":
-                        case "timestamp":
-                            value = resultSet.getDate(columnIndex);
-                            break;
-                        case "year":
-                            value = resultSet.getDate(columnIndex);
-                            break;
-                        case "time":
-                            value = resultSet.getTime(columnIndex);
-                            break;
-                        case "enum":
-                            value = resultSet.getInt(columnIndex);
-                            break;
-                        case "set":
-                            value = resultSet.getInt(columnIndex);
-                            break;
-                        case "bit":
-                            value = resultSet.getInt(columnIndex);
-                            break;
-                        default:
-                            throw new IllegalArgumentException("unsupported column type " + d.getType());
-                    }
-                    row.putData(d.getName(), value);
-                    ++columnIndex;
-                }
-                LOGGER.debug("bootstrapping in progress: producing row " + row.toJSON());
-                producer.push(row);
-            }
-            PreparedStatement preparedStatement = connection.prepareStatement("update maxwell.bootstrap set is_complete=1, completed_at=NOW() where id = ?");
-            preparedStatement.setLong(1, (long) bootstrapRow.getData("id"));
-            preparedStatement.execute();
-        }
-        LOGGER.info(String.format("bootstrapping ended for %s.%s", databaseName, tableName));
-    }
-
-    @Override
+	@Override
 	protected void beforeStop() throws Exception {
 		this.binlogEventListener.stop();
 		this.replicator.stop(5, TimeUnit.SECONDS);
 	}
 
-
 	private boolean isMaxwellRow(RowMap row) {
 		return row.getDatabase().equals("maxwell");
 	}
-
-    private boolean isMaxwellBootstrapStartRow(RowMap row) {
-        return row.getDatabase().equals("maxwell") &&
-               row.getTable().equals("bootstrap") &&
-               (long) row.getData("is_complete") == 0;
-    }
-
-    private boolean isMaxwellBootstrapCompleteRow(RowMap row) {
-        return row.getDatabase().equals("maxwell") &&
-                row.getTable().equals("bootstrap") &&
-                (long) row.getData("is_complete") == 1;
-    }
 
 	private BinlogPosition eventBinlogPosition(AbstractBinlogEventV4 event) {
 		BinlogPosition p = new BinlogPosition(event.getHeader().getNextPosition(), event.getBinlogFilename());
@@ -444,6 +320,10 @@ public class MaxwellReplicator extends RunLoopProcess {
 	private void setReplicatorPosition(AbstractBinlogEventV4 e) {
 		replicator.setBinlogFileName(e.getBinlogFilename());
 		replicator.setBinlogPosition(e.getHeader().getNextPosition());
+	}
+
+	public OpenReplicator getOpenReplicator( ) {
+		return replicator;
 	}
 }
 
