@@ -232,7 +232,7 @@ public class MaxwellConfig {
 		}
 
 		if ( this.bootstrapperType == null ) {
-			this.bootstrapperType = "async"; // FIXME: should the default be none?
+			this.bootstrapperType = "async";
 		} else if ( !this.bootstrapperType.equals("async")
 				&& !this.bootstrapperType.equals("sync")
 				&& !this.bootstrapperType.equals("none") ) {

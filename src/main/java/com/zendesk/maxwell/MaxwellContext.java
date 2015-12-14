@@ -131,7 +131,7 @@ public class MaxwellContext {
 		}
 	}
 
-	public AbstractBootstrapper getBootstrapper() {
+	public AbstractBootstrapper getBootstrapper() throws IOException {
 		switch ( this.config.bootstrapperType ) {
 			case "async":
 				return new AsynchronousBootstrapper(this);
