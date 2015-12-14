@@ -53,9 +53,9 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 		LOGGER.debug(String.format("bootstrapping request for %s.%s", databaseName, tableName));
 		Database database = findDatabase(schema, databaseName);
 		Table table = findTable(tableName, database);
-		// FIXME: obtain a write lock first!
 		BinlogPosition position = new BinlogPosition(replicator.getBinlogPosition(), replicator.getBinlogFileName());
-		producer.push(startBootstrapRow); // FIXME: this will end up in the wrong Kafka partition!
+		producer.push(startBootstrapRow);
+		producer.push(replicationStreamBootstrapStartRow(table, position));
 		LOGGER.info(String.format("bootstrapping started for %s.%s, binlog position is %s", databaseName, tableName, position.toString()));
 		try ( Connection connection = context.getConnectionPool().getConnection() ) {
 			setBootstrapRowToStarted(startBootstrapRow, connection);
@@ -72,16 +72,38 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 				LOGGER.debug("bootstrapping in progress: producing row " + row.toJSON());
 				producer.push(row);
 			}
-			setBootstrapRowToCompleted(startBootstrapRow, position, connection);
+			setBootstrapRowToCompleted(startBootstrapRow, connection);
 		}
+	}
+
+	private RowMap replicationStreamBootstrapStartRow(Table table, BinlogPosition position) {
+		return replicationStreamBootstrapRow("bootstrap-start", table, position);
+	}
+
+	private RowMap replicationStreamBootstrapCompletedRow(Table table, BinlogPosition position) {
+		return replicationStreamBootstrapRow("bootstrap-complete", table, position);
+	}
+
+	private RowMap replicationStreamBootstrapRow(String type, Table table, BinlogPosition position) {
+		return new RowMap(
+				type,
+				table.getDatabase().getName(),
+				table.getName(),
+				System.currentTimeMillis(),
+				table.getPKList(),
+				position);
 	}
 
 	@Override
 	public void completeBootstrap(RowMap completeBootstrapRow, Schema schema, AbstractProducer producer, OpenReplicator replicator) throws Exception {
 		String databaseName = ( String ) completeBootstrapRow.getData("database_name");
 		String tableName = ( String ) completeBootstrapRow.getData("table_name");
+		Database database = findDatabase(schema, databaseName);
 		ensureTable(tableName, findDatabase(schema, databaseName));
-		producer.push(completeBootstrapRow); // FIXME: this will end up in the wrong Kafka partition!
+		Table table = findTable(tableName, database);
+		BinlogPosition position = new BinlogPosition(replicator.getBinlogPosition(), replicator.getBinlogFileName());
+		producer.push(completeBootstrapRow);
+		producer.push(replicationStreamBootstrapCompletedRow(table, position));
 		LOGGER.info(String.format("bootstrapping ended for %s.%s", databaseName, tableName));
 	}
 
@@ -112,14 +134,13 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 	}
 
 	private ResultSet getAllRows(String databaseName, String tableName, Connection connection) throws SQLException {
-		Statement statement = createStreamingStatement(connection);
+		Statement statement = createBatchStatement(connection);
 		return statement.executeQuery(String.format("select * from %s.%s", databaseName, tableName));
 	}
 
-	private Statement createStreamingStatement(Connection connection) throws SQLException {
-		// see http://dev.mysql.com/doc/connector-j/en/connector-j-reference-implementation-notes.html
-		Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
-		statement.setFetchSize(Integer.MIN_VALUE);
+	private Statement createBatchStatement(Connection connection) throws SQLException {
+		Statement statement = connection.createStatement();
+		statement.setFetchSize(context.getConfig().bootstrapperBatchFetchSize);
 		return statement;
 	}
 
@@ -130,12 +151,10 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 		preparedStatement.execute();
 	}
 
-	private void setBootstrapRowToCompleted(RowMap startBootstrapRow, BinlogPosition position, Connection connection) throws SQLException {
-		String sql = "update maxwell.bootstrap set is_complete=1, completed_at=NOW(), binlog_position = ?, binlog_file = ? where id = ?";
+	private void setBootstrapRowToCompleted(RowMap startBootstrapRow, Connection connection) throws SQLException {
+		String sql = "update maxwell.bootstrap set is_complete=1, completed_at=NOW() where id = ?";
 		PreparedStatement preparedStatement = connection.prepareStatement(sql);
 		preparedStatement.setLong(1, ( Long ) startBootstrapRow.getData("id"));
-		preparedStatement.setLong(2, position.getOffset());
-		preparedStatement.setString(3, position.getFile());
 		preparedStatement.execute();
 	}
 
@@ -144,61 +163,8 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 		int columnIndex = 1;
 		while ( columnDefinitions.hasNext() ) {
 			ColumnDef columnDefinition = columnDefinitions.next();
-			row.putData(columnDefinition.getName(), getObject( resultSet, columnIndex, columnDefinition.getType( ) ));
+			row.putData(columnDefinition.getName(), resultSet.getObject(columnIndex));
 			++columnIndex;
-		}
-	}
-
-	private Object getObject(ResultSet resultSet, int columnIndex, String type) throws SQLException {
-		// FIXME: this switch statement is a work in progress!
-		switch ( type ) {
-			case "bool":
-			case "boolean":
-			case "tinyint":
-			case "smallint":
-			case "mediumint":
-			case "int":
-				return resultSet.getInt(columnIndex);
-			case "bigint":
-				return resultSet.getLong(columnIndex);
-			case "tinytext":
-			case "text":
-			case "mediumtext":
-			case "longtext":
-			case "varchar":
-			case "char":
-				return resultSet.getString(columnIndex);
-			case "tinyblob":
-			case "blob":
-			case "mediumblob":
-			case "longblob":
-			case "binary":
-			case "varbinary":
-				return resultSet.getBlob(columnIndex);
-			case "real":
-			case "numeric":
-			case "float":
-			case "double":
-				return resultSet.getDouble(columnIndex);
-			case "decimal":
-				return resultSet.getBigDecimal(columnIndex);
-			case "date":
-				return resultSet.getDate(columnIndex);
-			case "datetime":
-			case "timestamp":
-				return resultSet.getDate(columnIndex);
-			case "year":
-				return resultSet.getDate(columnIndex);
-			case "time":
-				return resultSet.getTime(columnIndex);
-			case "enum":
-				return resultSet.getInt(columnIndex);
-			case "set":
-				return resultSet.getInt(columnIndex);
-			case "bit":
-				return resultSet.getInt(columnIndex);
-			default:
-				throw new IllegalArgumentException("unsupported column type " + type);
 		}
 	}
 }

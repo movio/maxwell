@@ -4,6 +4,7 @@ import com.google.code.or.OpenReplicator;
 import com.zendesk.maxwell.producer.AbstractProducer;
 import com.zendesk.maxwell.schema.Schema;
 
+import java.io.IOException;
 import java.sql.SQLException;
 
 public abstract class AbstractBootstrapper {
@@ -18,7 +19,7 @@ public abstract class AbstractBootstrapper {
 
 	abstract public boolean isBootstrapRow(RowMap row);
 
-	abstract public boolean shouldSkip(RowMap row) throws SQLException;
+	abstract public boolean shouldSkip(RowMap row) throws SQLException, IOException;
 
 	abstract public void startBootstrap(RowMap startBootstrapRow, Schema schema, AbstractProducer producer, OpenReplicator replicator) throws Exception;
 

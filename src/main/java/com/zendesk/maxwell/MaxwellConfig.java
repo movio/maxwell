@@ -28,6 +28,7 @@ public class MaxwellConfig {
 	public String kafkaTopic;
 	public String producerType;
 	public String bootstrapperType;
+	public Integer bootstrapperBatchFetchSize;
 
 	public String outputFile;
 	public String log_level;
@@ -65,7 +66,8 @@ public class MaxwellConfig {
 
 		parser.accepts( "kafka.bootstrap.servers", "at least one kafka server, formatted as HOST:PORT[,HOST:PORT]" ).withRequiredArg();
 		parser.accepts( "kafka_topic", "optionally provide a topic name to push to. default: maxwell").withOptionalArg();
-		parser.accepts( "bootstrapper", "bootstrapper type: async|sync|none. default: async" ).withOptionalArg();
+		parser.accepts( "bootstrapper", "bootstrapper type: async|sync|none. default: async" ).withRequiredArg();
+		parser.accepts( "bootstrapper_fetch_size", "number of rows fetched at a time during bootstrapping. default: 64000" ).withRequiredArg();
 
 		parser.accepts( "max_schemas", "how many old schema definitions maxwell should keep around.  default: 5").withOptionalArg();
 		parser.accepts( "init_position", "initial binlog position, given as BINLOG_FILE:POSITION").withRequiredArg();
@@ -232,11 +234,15 @@ public class MaxwellConfig {
 		}
 
 		if ( this.bootstrapperType == null ) {
-			this.bootstrapperType = "async"; // FIXME: should the default be none?
+			this.bootstrapperType = "async";
 		} else if ( !this.bootstrapperType.equals("async")
 				&& !this.bootstrapperType.equals("sync")
 				&& !this.bootstrapperType.equals("none") ) {
 			usage("please specify --bootstrapper=async|sync|none");
+		}
+
+		if ( this.bootstrapperBatchFetchSize  == null ) {
+			this.bootstrapperBatchFetchSize = 64000;
 		}
 
 		if ( this.mysqlPort == null )

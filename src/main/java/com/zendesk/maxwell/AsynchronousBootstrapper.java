@@ -6,6 +6,7 @@ import com.zendesk.maxwell.schema.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.sql.SQLException;
 import java.util.LinkedList;
 import java.util.Queue;
@@ -17,9 +18,13 @@ public class AsynchronousBootstrapper extends AbstractBootstrapper {
 	private Thread thread = null;
 	private Queue<RowMap> queue = new LinkedList<>();
 	private RowMap bootstrappedRow = null;
+	private RowMapBufferByTable skippedRows = null;
 	private SynchronousBootstrapper synchronousBootstrapper = new SynchronousBootstrapper(context);
 
-	public AsynchronousBootstrapper( MaxwellContext context ) {	super(context); }
+	public AsynchronousBootstrapper( MaxwellContext context ) throws IOException {
+		super(context);
+		skippedRows = new RowMapBufferByTable();
+	}
 
 	@Override
 	public boolean isStartBootstrapRow(RowMap row) {
@@ -37,23 +42,27 @@ public class AsynchronousBootstrapper extends AbstractBootstrapper {
 	}
 
 	@Override
-	public boolean shouldSkip(RowMap row) throws SQLException {
-		if ( !isBootstrapRow(row) ) {
-			return false;
+	public boolean shouldSkip(RowMap row) throws SQLException, IOException {
+		if ( isBootstrapRow(row) && !isStartBootstrapRow(row) && !isCompleteBootstrapRow(row) ) {
+			return true;
 		}
 		if ( bootstrappedRow != null && haveSameTable(row, bootstrappedRow) ) {
+			skippedRows.add(row);
 			return true;
 		}
 		for ( RowMap queuedRow : queue ) {
 			if ( haveSameTable(row, queuedRow) ) {
+				skippedRows.add(row);
 				return true;
 			}
 		}
 		return false;
 	}
 
-	private boolean haveSameTable(RowMap table1, RowMap table2) {
-		return table1.getDatabase().equals(table2.getDatabase()) && table1.getTable().equals(table2.getTable());
+	private boolean haveSameTable(RowMap row, RowMap bootstrapStartRow) {
+		String databaseName = ( String ) bootstrapStartRow.getData("database_name");
+		String tableName = ( String ) bootstrapStartRow.getData("table_name");
+		return row.getDatabase().equals(databaseName) && row.getTable().equals(tableName);
 	}
 
 	@Override
@@ -87,12 +96,8 @@ public class AsynchronousBootstrapper extends AbstractBootstrapper {
 	public void completeBootstrap(RowMap completeBootstrapRow, Schema schema, AbstractProducer producer, OpenReplicator replicator) throws Exception {
 		String databaseName = ( String ) completeBootstrapRow.getData("database_name");
 		String tableName = ( String ) completeBootstrapRow.getData("table_name");
-		long position = ( long ) completeBootstrapRow.getData("binlog_position");
-		String file = ( String ) completeBootstrapRow.getData("binlog_file");
-		BinlogPosition startPosition = new BinlogPosition(position, file);
-		BinlogPosition endPosition = new BinlogPosition(replicator.getBinlogPosition(), replicator.getBinlogFileName());
 		try {
-			// FIXME: should replay events of table between startPosition and endPosition!
+			replaySkippedRows(databaseName, tableName, producer);
 			synchronousBootstrapper.completeBootstrap(completeBootstrapRow, schema, producer, replicator);
 			LOGGER.info(String.format("async bootstrapping ended for %s.%s", databaseName, tableName));
 		} catch ( Exception e ) {
@@ -105,6 +110,14 @@ public class AsynchronousBootstrapper extends AbstractBootstrapper {
 		if ( !queue.isEmpty() ) {
 			startBootstrap(queue.remove(), schema, producer, replicator);
 		}
+	}
+
+	private void replaySkippedRows(String databaseName, String tableName, AbstractProducer producer) throws Exception {
+		LOGGER.info("async bootstrapping: replaying " + skippedRows.size(databaseName, tableName) + " skipped rows...");
+		while( skippedRows.size(databaseName, tableName) > 0 ) {
+			producer.push(skippedRows.removeFirst(databaseName, tableName));
+		}
+		LOGGER.info("async bootstrapping: replay complete");
 	}
 
 	@Override
