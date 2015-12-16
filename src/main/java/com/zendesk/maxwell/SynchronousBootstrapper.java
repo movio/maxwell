@@ -151,7 +151,7 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 		preparedStatement.setLong(1, ( Long ) startBootstrapRow.getData("id"));
 		preparedStatement.execute();
 	}
-
+	
 	private void setBootstrapRowToCompleted(RowMap startBootstrapRow, Connection connection) throws SQLException {
 		String sql = "update maxwell.bootstrap set is_complete=1, completed_at=NOW() where id = ?";
 		PreparedStatement preparedStatement = connection.prepareStatement(sql);
@@ -162,19 +162,64 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 	private void setRowValues(RowMap row, ResultSet resultSet, Table table) throws SQLException, IOException {
 		Iterator<ColumnDef> columnDefinitions = table.getColumnList().iterator();
 		int columnIndex = 1;
-		Object value;
 		while ( columnDefinitions.hasNext() ) {
 			ColumnDef columnDefinition = columnDefinitions.next();
-			if ( columnDefinition instanceof DateTimeColumnDef ) {
-				value = resultSet.getLong(columnIndex);
-			} else {
-				value = resultSet.getObject(columnIndex);
-			}
-			if ( value != null ) {
-				value = columnDefinition.asJSON(value);
-			}
-			row.putData(columnDefinition.getName(), value);
+			row.putData(columnDefinition.getName(), getObject(resultSet, columnIndex, columnDefinition.getType()));
 			++columnIndex;
 		}
 	}
+
+	private Object getObject(ResultSet resultSet, int columnIndex, String type) throws SQLException {
+		switch ( type ) {
+			case "bool":
+			case "boolean":
+			case "tinyint":
+			case "smallint":
+			case "mediumint":
+			case "int":
+				return resultSet.getInt(columnIndex);
+			case "bigint":
+				return resultSet.getLong(columnIndex);
+			case "tinytext":
+			case "text":
+			case "mediumtext":
+			case "longtext":
+			case "varchar":
+			case "char":
+				return resultSet.getString(columnIndex);
+			case "tinyblob":
+			case "blob":
+			case "mediumblob":
+			case "longblob":
+			case "binary":
+			case "varbinary":
+				return resultSet.getString(columnIndex);
+			case "real":
+			case "numeric":
+			case "double":
+				return resultSet.getDouble(columnIndex);
+			case "float":
+				return resultSet.getFloat(columnIndex);
+			case "decimal":
+				return resultSet.getDouble(columnIndex);
+			case "date":
+				return resultSet.getString(columnIndex);
+			case "datetime":
+			case "timestamp":
+				return resultSet.getString(columnIndex);
+			case "year":
+				return resultSet.getInt(columnIndex);
+			case "time":
+				return resultSet.getString(columnIndex);
+			case "enum":
+				return resultSet.getString(columnIndex);
+			case "set":
+				return resultSet.getString(columnIndex);
+			case "bit":
+				return resultSet.getString(columnIndex);
+			default:
+				throw new IllegalArgumentException("unsupported column type " + type);
+		}
+	}
+
 }
