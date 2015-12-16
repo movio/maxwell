@@ -1,11 +1,13 @@
 package com.zendesk.maxwell;
 
 import com.google.code.or.OpenReplicator;
+import com.google.code.or.common.glossary.column.DatetimeColumn;
 import com.zendesk.maxwell.producer.AbstractProducer;
 import com.zendesk.maxwell.schema.Database;
 import com.zendesk.maxwell.schema.Schema;
 import com.zendesk.maxwell.schema.Table;
 import com.zendesk.maxwell.schema.columndef.ColumnDef;
+import com.zendesk.maxwell.schema.columndef.DateTimeColumnDef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,7 +71,6 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 						table.getPKList(),
 						position);
 				setRowValues(row, resultSet, table);
-				LOGGER.debug("bootstrapping in progress: producing row " + row.toJSON());
 				producer.push(row);
 			}
 			setBootstrapRowToCompleted(startBootstrapRow, connection);
@@ -161,9 +162,18 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 	private void setRowValues(RowMap row, ResultSet resultSet, Table table) throws SQLException, IOException {
 		Iterator<ColumnDef> columnDefinitions = table.getColumnList().iterator();
 		int columnIndex = 1;
+		Object value;
 		while ( columnDefinitions.hasNext() ) {
 			ColumnDef columnDefinition = columnDefinitions.next();
-			row.putData(columnDefinition.getName(), resultSet.getObject(columnIndex));
+			if ( columnDefinition instanceof DateTimeColumnDef ) {
+				value = resultSet.getLong(columnIndex);
+			} else {
+				value = resultSet.getObject(columnIndex);
+			}
+			if ( value != null ) {
+				value = columnDefinition.asJSON(value);
+			}
+			row.putData(columnDefinition.getName(), value);
 			++columnIndex;
 		}
 	}
