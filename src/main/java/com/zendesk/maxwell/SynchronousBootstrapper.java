@@ -16,7 +16,6 @@ import java.util.Iterator;
 public class SynchronousBootstrapper extends AbstractBootstrapper {
 
 	static final Logger LOGGER = LoggerFactory.getLogger(MaxwellReplicator.class);
-	static final int BATCH_FETCH_SIZE = 64000;
 
 	public SynchronousBootstrapper( MaxwellContext context ) { super(context); }
 
@@ -55,6 +54,7 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 		Database database = findDatabase(schema, databaseName);
 		Table table = findTable(tableName, database);
 		BinlogPosition position = new BinlogPosition(replicator.getBinlogPosition(), replicator.getBinlogFileName());
+		producer.push(startBootstrapRow);
 		producer.push(replicationStreamBootstrapStartRow(table, position));
 		LOGGER.info(String.format("bootstrapping started for %s.%s, binlog position is %s", databaseName, tableName, position.toString()));
 		try ( Connection connection = context.getConnectionPool().getConnection() ) {
@@ -102,6 +102,7 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 		ensureTable(tableName, findDatabase(schema, databaseName));
 		Table table = findTable(tableName, database);
 		BinlogPosition position = new BinlogPosition(replicator.getBinlogPosition(), replicator.getBinlogFileName());
+		producer.push(completeBootstrapRow);
 		producer.push(replicationStreamBootstrapCompletedRow(table, position));
 		LOGGER.info(String.format("bootstrapping ended for %s.%s", databaseName, tableName));
 	}
@@ -139,7 +140,7 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 
 	private Statement createBatchStatement(Connection connection) throws SQLException {
 		Statement statement = connection.createStatement();
-		statement.setFetchSize(BATCH_FETCH_SIZE);
+		statement.setFetchSize(context.getConfig().bootstrapperBatchFetchSize);
 		return statement;
 	}
 
@@ -162,62 +163,8 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 		int columnIndex = 1;
 		while ( columnDefinitions.hasNext() ) {
 			ColumnDef columnDefinition = columnDefinitions.next();
-			row.putData(columnDefinition.getName(), getObject( resultSet, columnIndex, columnDefinition.getType( ) ));
+			row.putData(columnDefinition.getName(), resultSet.getObject(columnIndex));
 			++columnIndex;
-		}
-	}
-
-	private Object getObject(ResultSet resultSet, int columnIndex, String type) throws SQLException {
-		// FIXME: need to find a better way of doing this by reusing code elsewhere
-		switch ( type ) {
-			case "bool":
-			case "boolean":
-			case "tinyint":
-			case "smallint":
-			case "mediumint":
-			case "int":
-				return resultSet.getInt(columnIndex);
-			case "bigint":
-				return resultSet.getLong(columnIndex);
-			case "tinytext":
-			case "text":
-			case "mediumtext":
-			case "longtext":
-			case "varchar":
-			case "char":
-				return resultSet.getString(columnIndex);
-			case "tinyblob":
-			case "blob":
-			case "mediumblob":
-			case "longblob":
-			case "binary":
-			case "varbinary":
-				return resultSet.getString(columnIndex);
-			case "real":
-			case "numeric":
-			case "double":
-				return resultSet.getDouble(columnIndex);
-			case "float":
-				return resultSet.getFloat(columnIndex);
-			case "decimal":
-				return resultSet.getDouble(columnIndex);
-			case "date":
-				return resultSet.getString(columnIndex);
-			case "datetime":
-			case "timestamp":
-				return resultSet.getString(columnIndex);
-			case "year":
-				return resultSet.getInt(columnIndex);
-			case "time":
-				return resultSet.getString(columnIndex);
-			case "enum":
-				return resultSet.getString(columnIndex);
-			case "set":
-				return resultSet.getString(columnIndex);
-			case "bit":
-				return resultSet.getString(columnIndex);
-			default:
-				throw new IllegalArgumentException("unsupported column type " + type);
 		}
 	}
 }
