@@ -30,7 +30,7 @@ public class MaxwellBootstrap {
 		private Thread thread = null;
 		private boolean isRunning = true;
 		private boolean seenStartRow = false;
-		private long startedTimeMillis;
+		private long startedTimeMillis = 0;
 
 		public ProgressReporter(final int total) {
 			thread = new Thread(new Runnable() {
@@ -63,6 +63,9 @@ public class MaxwellBootstrap {
 						isRunning = false;
 						LOGGER.info("bootstrapping complete");
 					} else if ( seenStartRow && tableMatches(json) ) {
+						if ( startedTimeMillis == 0 ) {
+							startedTimeMillis = System.currentTimeMillis();
+						}
 						++count;
 						displayProgress(total, count);
 					}
@@ -86,7 +89,6 @@ public class MaxwellBootstrap {
 
 		public void start() {
 			thread.start();
-			startedTimeMillis = System.currentTimeMillis();
 		}
 
 		public void join( ) throws InterruptedException {
@@ -100,7 +102,7 @@ public class MaxwellBootstrap {
 				long predictedTotalMillis = ( long ) ((elapsedMillis / ( float ) count) * total);
 				long remainingMillis = predictedTotalMillis - elapsedMillis;
 				String duration = prettyDuration(remainingMillis);
-				displayLine(String.format("%d / %d (%.2f%%) - %s remaining", count, total, ( count * 100.0 ) / total, duration));
+				displayLine(String.format("%d / %d (%.2f%%) - %s", count, total, ( count * 100.0 ) / total, duration));
 			}
 			if ( count == total ) {
 				System.out.println();
@@ -108,18 +110,18 @@ public class MaxwellBootstrap {
 		}
 
 		private String prettyDuration(long millis) {
-			long d = millis / (1000 * 60 * 60 * 24);
-			long h = millis / (1000 * 60 * 60);
-			long m = millis / (1000 * 60);
-			long s = millis / 1000;
+			long d = (millis / (1000 * 60 * 60 * 24));
+			long h = (millis / (1000 * 60 * 60)) % 24;
+			long m = (millis / (1000 * 60)) % 60;
+			long s = (millis / (1000)) % 60;
 			if ( d > 0 ) {
-				return String.format("%d days %02dh %02dm %02ds", d, h, m, s);
+				return String.format("%d days %02dh %02dm %02ds remaining", d, h, m, s);
 			} else if ( h > 0 ) {
-				return String.format("%02dh %02dm %02ds", h, m, s);
+				return String.format("%02dh %02dm %02ds remaining", h, m, s);
 			} else if ( m > 0 ) {
-				return String.format("%02dm %02ds", m, s);
+				return String.format("%02dm %02ds remaining", m, s);
 			} else if ( s > 0 ) {
-				return String.format("%02ds", s);
+				return String.format("%02ds remaining", s);
 			} else {
 				return "";
 			}

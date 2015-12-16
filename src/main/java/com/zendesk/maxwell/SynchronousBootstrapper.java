@@ -151,7 +151,7 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 		preparedStatement.setLong(1, ( Long ) startBootstrapRow.getData("id"));
 		preparedStatement.execute();
 	}
-	
+
 	private void setBootstrapRowToCompleted(RowMap startBootstrapRow, Connection connection) throws SQLException {
 		String sql = "update maxwell.bootstrap set is_complete=1, completed_at=NOW() where id = ?";
 		PreparedStatement preparedStatement = connection.prepareStatement(sql);
