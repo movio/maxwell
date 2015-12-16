@@ -71,6 +71,7 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 						table.getPKList(),
 						position);
 				setRowValues(row, resultSet, table);
+				LOGGER.debug("bootstrapping row : " + row.toJSON());
 				producer.push(row);
 			}
 			setBootstrapRowToCompleted(startBootstrapRow, connection);
