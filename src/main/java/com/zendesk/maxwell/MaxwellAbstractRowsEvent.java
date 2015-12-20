@@ -8,6 +8,7 @@ import com.google.code.or.binlog.BinlogEventV4Header;
 import com.google.code.or.binlog.impl.event.AbstractRowEvent;
 import com.google.code.or.common.glossary.Column;
 import com.google.code.or.common.glossary.Row;
+import com.google.code.or.common.glossary.column.BitColumn;
 import com.google.code.or.common.glossary.column.DatetimeColumn;
 import com.zendesk.maxwell.schema.Database;
 import com.zendesk.maxwell.schema.Table;
@@ -22,11 +23,11 @@ import org.slf4j.LoggerFactory;
 
 public abstract class MaxwellAbstractRowsEvent extends AbstractRowEvent {
 	static final Logger LOGGER = LoggerFactory.getLogger(MaxwellAbstractRowsEvent.class);
-	private final MaxwellFilter filter;
 	private final AbstractRowEvent event;
 
 	protected final Table table;
 	protected final Database database;
+	protected final MaxwellFilter filter;
 
 	public MaxwellAbstractRowsEvent(AbstractRowEvent e, Table table, MaxwellFilter f) {
 		this.tableId = e.getTableId();
@@ -166,41 +167,33 @@ public abstract class MaxwellAbstractRowsEvent extends AbstractRowEvent {
 		return sql.toString();
 	}
 
+	protected RowMap buildRowMap() {
+		return new RowMap(
+				getType(),
+				getDatabase().getName(),
+				getTable().getName(),
+				getHeader().getTimestamp() / 1000,
+				table.getPKList(),
+				this.getNextBinlogPosition());
+	}
+
+
 	public List<RowMap> jsonMaps() {
 		ArrayList<RowMap> list = new ArrayList<>();
-		Object value;
+
 		for ( Iterator<Row> ri = filteredRows().iterator() ; ri.hasNext(); ) {
 			Row r = ri.next();
 
-			RowMap rowMap = new RowMap(
-					getType(),
-					getDatabase().getName(),
-					getTable().getName(),
-					getHeader().getTimestamp() / 1000,
-					table.getPKList(),
-					this.getNextBinlogPosition());
+			RowMap rowMap = buildRowMap();
 
-			Iterator<Column> colIter = r.getColumns().iterator();
-			Iterator<ColumnDef> defIter = table.getColumnList().iterator();
+			for ( ColumnWithDefinition cd : new ColumnWithDefinitionList(table, r, getUsedColumns()) )
+				rowMap.putData(cd.definition.getName(), cd.asJSON());
 
-			while ( colIter.hasNext() && defIter.hasNext() ) {
-				Column c = colIter.next();
-				ColumnDef d = defIter.next();
-
-				if (c instanceof DatetimeColumn) {
-					value = ((DatetimeColumn) c).getLongValue();
-				} else {
-					value = c.getValue();
-				}
-
-				if ( value != null )
-					value = d.asJSON(value);
-
-				rowMap.putData(d.getName(), value);
-			}
 			list.add(rowMap);
 		}
 
 		return list;
 	}
+
+	protected abstract BitColumn getUsedColumns();
 }
