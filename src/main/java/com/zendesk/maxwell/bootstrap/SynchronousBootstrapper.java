@@ -180,10 +180,17 @@ public class SynchronousBootstrapper extends AbstractBootstrapper {
 	private ResultSet getAllRows(String databaseName, String tableName, Schema schema, Connection connection) throws SQLException, InterruptedException {
 		Statement statement = createBatchStatement(connection);
 		String pk = schema.findDatabase(databaseName).findTable(tableName).getPKString();
+
+		String marchHack = "";
+		if (tableName.equals("pos_transactions"))
+			marchHack = "where local_transaction_date >= '2016-03-01'";
+		else if (tableName.equals("pos_transaction_lines"))
+			marchHack = "where local_session_date >= '2016-03-01'";
+
 		if ( pk != null && !pk.equals("") ) {
-			return statement.executeQuery(String.format("select * from %s.%s order by %s", databaseName, tableName, pk));
+			return statement.executeQuery(String.format("select * from %s.%s %s order by %s", databaseName, tableName, marchHack, pk));
 		} else {
-			return statement.executeQuery(String.format("select * from %s.%s", databaseName, tableName));
+			return statement.executeQuery(String.format("select * from %s.%s %s", databaseName, tableName, marchHack));
 		}
 	}
 
